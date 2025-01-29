@@ -1,0 +1,256 @@
+#!/usr/bin/env ruby
+
+# This command requires ruby to be installed in order to run. It should work
+# with ruby 3 and up.
+#
+# Used to manage multiple databases based on the various branches in your
+# project. It requires a bit of setup, but once the setup is complete it should
+# work reasonably well.
+#
+# The fundamental idea behind this git command is to easily switch between
+# databases for branches which are at varying migration levels. If it doesn't
+# find a database which is registered to exactly match the current branch name,
+# it looks at the git history to find the "closest" branch there is a
+# corresponding database for. So if your branches look like this:
+#
+# _______________________________________ main
+#   \____________________________________ develop
+#     |
+#     |\_________________________________ feature/A
+#     |    \_____________________________ feature/A-subfeature
+#      \_________________________________ feature/B
+#           \____________________________ feature/B-subfeature
+#
+# ... then you could for example have these databases:
+#
+#   - main
+#   - develop
+#   - feature_a
+#   - feature_b
+#
+# ... And then feature_a and feature_b could be re-used for feature/A-subfeature
+# and feature/B-subfeature, since those branches are likely to be similar in
+# terms of migration level.
+#
+# Note: This can potentially get messy if you'd for example merge develop
+# straight into a subfeature branch or some such, but for straightforward
+# examples (and particularly if the current branch name matches the registered
+# root branch name), it should work well.
+#
+# Usage:
+#   git db roots        # => list root branches for databases
+#   git db add          # => add current branch as root branch for database
+#   git db rm <branch>  # => remove database and root branch
+#   git db apply        # => apply the database most closely associated with the current branch
+#
+# The commands git db get-cmd, git db set-cmd, git db create-cmd and
+# git db rm-cmd are used to set up the shell commands which allow you to create
+# a new database on the fly. In my current project I've set them up like this:
+#
+#   git db create-cmd 'dce db createdb -Upostgres -Oupstacked $DBNAME'
+#   git db rm-cmd 'dce db dropdb -Upostgres $DBNAME'
+#   git db get-cmd
+#     rg 'POSTGRES_DB=(.*)' -or '$1' $(git rev-parse --show-toplevel)/backend-service/docker-compose-configmap.env
+#   git db set-cmd
+#     gsed -i 's/POSTGRES_DB=.*/POSTGRES_DB='$DBNAME'/' $(git rev-parse --show-toplevel)/backend-service/docker-compose-configmap.env
+#
+# Note that the create-cmd and rm-cmd commands are using the 'dce' shorthand
+# which is defined separately in this repo. The get-cmd uses ripgrep and set-cmd
+# uses gsed; substitute with the commands you have installed.
+
+
+require 'shellwords'
+
+LEAD_CHARS_REGEX = /[ *+!-]*/
+
+
+def dbname(n)
+  n.gsub(/[^a-zA-Z0-9_]/, "_")[...63]
+end
+
+def try_get_cmd_from_file(filename, default: nil, prompt_cmd: false, &block)
+  cmd = File.read(filename).strip if filename
+  if cmd && cmd.empty? && default && !default.empty?
+    cmd = default.strip
+  end
+  if cmd.empty? && prompt_cmd && block_given?
+    cmd = yield
+    cmd = cmd&.strip
+  end
+  cmd if cmd && !cmd.empty?
+end
+
+
+if ! ["get", "add", "rm", "rm-branch", "rm-cmd", "roots", "get-branch", "create-cmd", "get-cmd",  "set-cmd", "apply"].include?(ARGV.at(0))
+  puts "USAGE:"
+  puts "  git db roots"
+  puts "      List all root branches"
+  puts "  git db get"
+  puts "      Print current database"
+  puts "  git db add [<branch-name>]"
+  puts "      Add given branch name to list of root branches and create its"
+  puts "      corresponding database if it does not exist. Defaults to"
+  puts "      the current branch"
+  puts "  git db rm <branch-name>"
+  puts "      Remove a given branch from the list of root branches"
+  puts "  git db apply"
+  puts "      Switch to the database belonging to the root branch which the"
+  puts "      current branch is based on"
+  puts "  git db get-cmd [<cmd>]"
+  puts "      Overwrite the command to extract the current database with the"
+  puts "      given command, or prompt the user if no argument given"
+  puts "  git db set-cmd [<cmd>]"
+  puts "      Overwrite the command to set the current database with the"
+  puts "      given command, or prompt the user if no argument given"
+  puts "  git db create-cmd [<cmd>]"
+  puts "      Overwrite the command to create a new database with the"
+  puts "      given command, or prompt the user if no argument given"
+  return
+end
+
+GIT_ENV         = `git rev-parse --show-toplevel`.strip
+ROOT_FILE       = "#{ GIT_ENV }/.git/.db-roots"
+CREATE_CMD_FILE = "#{ GIT_ENV }/.git/.db-create"
+GET_CMD_FILE    = "#{ GIT_ENV }/.git/.db-get"
+SET_CMD_FILE    = "#{ GIT_ENV }/.git/.db-set"
+RM_CMD_FILE     = "#{ GIT_ENV }/.git/.db-rm"
+[ROOT_FILE, CREATE_CMD_FILE, GET_CMD_FILE, SET_CMD_FILE, RM_CMD_FILE].each do |f|
+  if !File.exist?(f)
+    File.open(f, "w") {}
+  end
+end
+
+roots = File.readlines(ROOT_FILE).map(&:strip).reject(&:empty?).to_set
+
+def db_get_cmd()
+  try_get_cmd_from_file(nil, default: ARGV.at(1), prompt_cmd: true) do
+     STDERR.print("Write command to get current database: ")
+     STDIN.gets()
+  end
+  File.open(GET_CMD_FILE, "w") { |f| f.write(cmd) }
+  return cmd
+end
+
+def db_get(prompt_cmd: false)
+  cmd = try_get_cmd_from_file(GET_CMD_FILE, prompt_cmd:) { db_get_cmd() }
+  `#{ cmd }`.strip if cmd && !cmd.empty?
+end
+
+def db_get_branch(roots, current_branch)
+  showb_sources = [*roots, current_branch]
+  ancestors = `git show-branch #{ showb_sources.map(&:inspect).join(" ") }`.strip.split("\n")
+  root_regex = roots.map { Regexp.escape(_1) }.join("|")
+  parent_branch_name_regex = /\A#{ LEAD_CHARS_REGEX }\*#{ LEAD_CHARS_REGEX } *\[(#{root_regex})\]/
+  selected_branch_name,= ancestors.lazy
+    .map { _1.match(parent_branch_name_regex) }
+    .find(&:itself)
+    &.values_at(1)
+  selected_branch_name
+end
+
+def db_rm_branch(roots,branchname)
+  if !roots.include?(branchname)
+    return
+  end
+  roots.delete(branchname)
+  File.open(ROOT_FILE, "w") { |f| roots.each { |l| f.puts(l) } }
+end
+
+def db_rm(branchname, prompt_cmd: false)
+  cmd = try_get_cmd_from_file(RM_CMD_FILE, prompt_cmd:) { `git db rm-cmd` }
+  `DBNAME=#{dbname(branchname)} bash -c #{ Shellwords.escape cmd } 2>&1 > /dev/null`
+end
+
+
+if ARGV.at(0) == "roots"
+  currentdb = db_get()
+  puts roots.to_a.map { |r| currentdb == dbname(r) ? "* #{ r }" : "  #{ r }" }
+end
+
+if ARGV.at(0) == "get"
+  puts db_get(prompt_cmd: true)
+end
+
+if ARGV.at(0) == "get-branch"
+  current_branch = `git rev-parse --abbrev-ref HEAD`.strip
+  puts db_get_branch(roots, current_branch)
+end
+
+if ARGV.at(0) == "add"
+  branchname = ARGV.at(1) || `git rev-parse --abbrev-ref HEAD`.strip
+  if roots.include?(branchname)
+    return
+  end
+  roots << branchname
+  cmd = try_get_cmd_from_file(CREATE_CMD_FILE, prompt_cmd: true) { `git-db create-cmd` }
+  `DBNAME=#{dbname(branchname)} bash -c #{ Shellwords.escape cmd } 2>&1 > /dev/null`
+  File.open(ROOT_FILE, "w") { |f| roots.each { |l| f.puts(l) } }
+end
+
+if ARGV.at(0) == "rm"
+  branchname = ARGV.at(1)
+  if !branchname
+    puts "USAGE:"
+    puts "  git db rm <branch-name>"
+  end
+  db_rm_branch(roots, branchname)
+  db_rm(branchname, prompt_cmd: true)
+end
+
+if ARGV.at(0) == "rm-cmd"
+  cmd = try_get_cmd_from_file(nil, default: ARGV.at(1), prompt_cmd: true) do
+    STDERR.print("Write command to delete current database ($DBNAME): ")
+    STDIN.gets().strip
+  end
+  File.open(RM_CMD_FILE,"w") { |f| f.write(cmd) }
+  puts cmd
+end
+
+if ARGV.at(0) == "rm-branch"
+  branchname = ARGV.at(1)
+  if !branchname
+    puts "USAGE:"
+    puts "  git db rm <branch-name>"
+  end
+  db_rm_branch(roots, branchname)
+end
+
+if ARGV.at(0) == "create-cmd"
+  cmd = try_get_cmd_from_file(nil, default: ARGV.at(1), prompt_cmd: true) do
+    STDERR.print("Write command to create database ($DBNAME): ")
+    STDIN.gets()
+  end
+  File.open(CREATE_CMD_FILE, "w") { |f| f.write(cmd) }
+  puts cmd
+end
+
+if ARGV.at(0) == "get-cmd"
+  puts db_get_cmd()
+end
+
+if ARGV.at(0) == "set-cmd"
+  cmd = try_get_cmd_from_file(nil, default: ARGV.at(1), prompt_cmd: true) do
+    STDERR.print("Write command to set current database ($DBNAME): ")
+    STDIN.gets()
+  end
+  File.open(SET_CMD_FILE, "w") { |f| f.write(cmd) }
+  puts cmd
+end
+
+
+if ARGV.at(0) == "apply"
+  current_branch = `git rev-parse --abbrev-ref HEAD`.strip
+  current_db = dbname(`git db get`.strip)
+
+  selected_branch_name = ARGV.at(1) if roots.include?(ARGV.at(1))
+  selected_branch_name ||= db_get_branch(roots, current_branch)
+  return if !selected_branch_name
+  new_db = dbname(selected_branch_name)
+
+  return if new_db == current_db
+
+  cmd = try_get_cmd_from_file(SET_CMD_FILE, prompt_cmd: true) { `git db set-cmd` }
+  cmd = "DBNAME=#{new_db} bash -c #{ Shellwords.escape cmd } 2>&1 > /dev/null"
+  `#{ cmd }`
+  puts new_db
+end

@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# I often find myself noticing right after committing that I really should have
+# included a tiny change in the previous commit. This is a command which makes
+# that specific workflow easier. It relies on the git fixup command defined in
+# .gitignore in this repo.
+#
+# Usage:
+#   git commit -m"Some changes"
+#   # <notice I should have included something in that commit>
+#   # <make change>
+#   git add changed-file
+#   git commit -mf  # Note: commit title matters
+#   git fuckup      # this melds the changes into the previous commit
+#
+# It's also possible to fold multiple commits into the previous commit. For
+# example, if the commit history looks like this (most recent commit at top):
+#
+#   * <sha-5> f
+#   * <sha-4> Another reasonable change
+#   * <sha-3> f
+#   * <sha-2> f
+#   * <sha-1> Reasonable change
+#
+# ... Then running "git fuckup 5" would fold sha-5 into sha-4, and sha-3 and
+# sha-2 into sha-1.
+#
+# Just make sure you don't run this command in front of an important client. The
+# naming might seem unprofessional.
+
+GIT_SEQUENCE_EDITOR="sed -i '' -e 's/^pick \([0-9a-f]*\) f$/f \1 f/'" git fixup $@

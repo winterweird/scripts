@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# Used to see how many commits have been committed at my current branch and some
+# reference branch, respectively. I use this mainly to figure out whether a
+# local or remote branch is safe to delete.
+
+
+if [[ $# < 1 ]]; then
+    >&2 echo "Usage:"
+    >&2 echo "  git divergence <branch-name>"
+    >&2 echo "  git divergence <commit-hash>"
+    >&2 echo "  git divergence <A> <B>"
+    exit 1
+fi
+
+if [[ $# == 1 ]]; then
+    git rev-list --left-right --count HEAD..."$1"
+else
+    git rev-list --left-right --count "$1"..."$2"
+fi

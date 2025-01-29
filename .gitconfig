@@ -1,0 +1,39 @@
+[user]
+    email = ...
+    name = ...
+[push]
+    default = simple
+[alias]
+    # Better logging commands
+    l = !"git lg1-specific"
+    lg = !"git lg1"
+    lg1 = !"git lg1-specific --all"
+    lg2 = !"git lg2-specific --all"
+    lg3 = !"git lg3-specific --all"
+
+    lg1-specific = log --graph --abbrev-commit --topo-order --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold green)(%ar)%C(reset) %C(white)%s%C(reset) %C(dim white)- %aN%C(reset)%C(auto)%d%C(reset)'
+    lg2-specific = log --graph --abbrev-commit --topo-order --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold cyan)%aD%C(reset) %C(bold green)(%ar)%C(reset)%C(auto)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %aN%C(reset)'
+    lg3-specific = log --graph --abbrev-commit --topo-order --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold cyan)%aD%C(reset) %C(bold green)(%ar)%C(reset) %C(bold cyan)(committed: %cD)%C(reset) %C(auto)%d%C(reset)%n''          %C(white)%s%C(reset)%n''          %C(dim white)- %aN <%ae> %C(reset) %C(dim white)(committer: %cn <%ce>)%C(reset)'
+
+    # Do interactive rebase for the last 2 commits (or n comments if a number is
+    # given as the argument)
+    # I don't remember what 'root' was. I suspect it was a way to easily rebase
+    # everything since I branched out from some configured "root branch", but I
+    # don't use it anymore. The definition of "git revcount" is lost to time.
+    fixup = !"git stash && if [[ $1 = 'root' ]]; then x=`git revcount`; git rebase -i HEAD~${x:-2}; else git rebase -i HEAD~${1:-2}; fi ; git stash pop ; # "
+
+    # Most recently committed to branch is shown at the top. It's probably most
+    # relevant.
+    branches = branch --sort=-committerdate
+
+    # Fast-forward a given branch which is not checked out atm.
+    ffwd = !"git fetch origin $1:$1 ; #"
+
+    # Random dad joke if I happen to misspell "git add"
+    dad = !"curl -H'Accept: text/plain' https://icanhazdadjoke.com/; echo '' #"
+[core]
+	editor = nvim
+[pull]
+	ff = only
+[log]
+	date = iso

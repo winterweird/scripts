@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# This script runs a given docker-compose command relative to a specific compose
+# file defined on a per-project basis.
+# Put it in your $PATH.
+#
+# This is a helper script which allows us to run project-specific docker-compose
+# commands in a given git repo. This script is used as a helper command for
+# other shortcuts such as `dce` or `dcr`, but can also be used as a standalone
+# command for running docker-compose commands which do not have an existing
+# shortcut defined (such as `compose down`).
+#
+# We're using git config to track which docker-compose.yml file we want to run
+# the compose command relative to. In most git projects this config might be
+# empty, in which case it will default to the docker-compose.yml file in the git
+# root directory. This allows us for example to specify that the
+# $GIT_ROOT/dev/docker-compose.yml file (which extends all the services we need
+# to use) should be the basis for any compose command.
+#
+# Here's how you can set the config:
+#   git config --add docker.compose.projectfolder "dev"
+#
+# Here's how to remove it:
+#   git config --unset docker.compose.projectfolder
+#
+# Example:
+#   compose down
+#   compose ps
+
+FILE="$(git rev-parse --show-toplevel)/$(git config docker.compose.projectfolder)/docker-compose.yml"
+>&2 echo "docker-compose $COMPOSE_COMMAND_FLAGS -f $FILE $@"
+docker compose -f "$FILE" "$@"

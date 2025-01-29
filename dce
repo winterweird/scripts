@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# This script executes the given command on the given docker compose service.
+# Put it in your $PATH.
+# Example:
+#   dce backend-api python app/manage.py shell
+#   dce backend-api python app/manage.py migrate api
+#   dce uma bash
+#   dce db psql -Upostgres upstacked
+
+compose exec "$@"

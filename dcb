@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# This script forces a rebuild of a service. This can be useful in some cases
+# where hot reloading is not implemented or working properly.
+# Put it in your $PATH.
+# Example:
+#   dcb monitoring-engine
+
+compose up -d --build "$@"

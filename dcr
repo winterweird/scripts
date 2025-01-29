@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# This scripts creates or restarts the docker-compose service with the given name.
+# Put it in your $PATH.
+# Example:
+#   dcr backend-api uma
+
+compose up -d --force-recreate --remove-orphans $@

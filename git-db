@@ -70,10 +70,10 @@ end
 
 def try_get_cmd_from_file(filename, default: nil, prompt_cmd: false, &block)
   cmd = File.read(filename).strip if filename
-  if cmd && cmd.empty? && default && !default.empty?
+  if cmd&.empty? && default && !default.empty?
     cmd = default.strip
   end
-  if cmd.empty? && prompt_cmd && block_given?
+  if cmd&.empty? && prompt_cmd && block_given?
     cmd = yield
     cmd = cmd&.strip
   end
